@@ -1,6 +1,10 @@
-streamlit==1.28.0
-tensorflow==2.13.0
-pillow==10.0.1
+Flask==2.3.3
+torch==2.0.1
+torchvision==0.15.2
+clip @ git+https://github.com/openai/CLIP.git
+faiss-cpu==1.7.4
 numpy==1.24.3
-pandas==2.0.3
-sqlite3
+Pillow==10.0.0
+matplotlib==3.7.2
+tqdm==4.65.0
+gunicorn==20.1.0

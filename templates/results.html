@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resultados - E-Pill Classifier</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-capsules"></i> E-Pill Classifier</h1>
+            <p class="subtitle">Resultados da Busca</p>
+        </header>
+
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('index') }}"><i class="fas fa-arrow-left"></i> Nova Busca</a></li>
+            </ul>
+        </nav>
+
+        <main>
+            <div class="results-container">
+                <div class="card">
+                    <h2><i class="fas fa-images"></i> Imagem de Consulta</h2>
+                    <div class="query-image">
+                        <img src="{{ url_for('static', filename='uploads/' + query_image.split('/')[-1]) }}" 
+                             alt="Imagem de consulta">
+                    </div>
+                </div>
+
+                {% if plot_url %}
+                <div class="card">
+                    <h2><i class="fas fa-chart-bar"></i> Visualização dos Resultados</h2>
+                    <div class="plot-container">
+                        <img src="{{ plot_url }}" alt="Visualização dos resultados">
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="card">
+                    <h2><i class="fas fa-list-ol"></i> Resultados Detalhados (Top {{ k }})</h2>
+                    
+                    <div class="results-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Posição</th>
+                                    <th>Distância</th>
+                                    <th>Arquivo</th>
+                                    <th>Visualização</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for result in results %}
+                                <tr>
+                                    <td class="rank">#{{ result.rank }}</td>
+                                    <td class="distance">{{ "%.4f"|format(result.distance) }}</td>
+                                    <td class="filename">{{ result.filename }}</td>
+                                    <td class="preview">
+                                        <img src="{{ result.path }}" 
+                                             alt="Imagem similar {{ result.rank }}"
+                                             onerror="this.onerror=null; this.src='https://via.placeholder.com/100x100?text=Imagem+não+encontrada';">
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="results-info">
+                        <p><i class="fas fa-info-circle"></i> 
+                            <strong>Distância:</strong> Valores menores indicam maior similaridade. 
+                            Distância 0 = imagem idêntica.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <a href="{{ url_for('index') }}" class="btn-back">
+                        <i class="fas fa-search"></i> Fazer Nova Busca
+                    </a>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Sistema de Classificação de Imagens &copy; 2024</p>
+            <p class="tech">Powered by CLIP + FAISS + Flask</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Pill Classifier - Busca de Imagens Similares</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-capsules"></i> E-Pill Classifier</h1>
+            <p class="subtitle">Sistema de busca de imagens similares usando IA</p>
+        </header>
+
+        <nav>
+            <ul>
+                <li><a href="#upload" class="active">Buscar</a></li>
+                <li><a href="#about">Sobre</a></li>
+            </ul>
+        </nav>
+
+        <main>
+            <section id="upload" class="card">
+                <h2><i class="fas fa-search"></i> Buscar Imagens Similares</h2>
+                <p>Faça upload de uma imagem para encontrar as imagens mais similares no dataset</p>
+                
+                <form action="/" method="POST" enctype="multipart/form-data" class="upload-form">
+                    <div class="form-group">
+                        <label for="file"><i class="fas fa-cloud-upload-alt"></i> Selecione uma imagem:</label>
+                        <input type="file" id="file" name="file" accept=".jpg,.jpeg,.png" required>
+                        <div class="file-info">Formatos aceitos: JPG, JPEG, PNG</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="k"><i class="fas fa-sliders-h"></i> Número de resultados:</label>
+                        <select id="k" name="k">
+                            <option value="3">3 resultados</option>
+                            <option value="5" selected>5 resultados</option>
+                            <option value="10">10 resultados</option>
+                        </select>
+                    </div>
+                    
+                    <button type="submit" class="btn-submit">
+                        <i class="fas fa-search"></i> Buscar Similares
+                    </button>
+                </form>
+                
+                {% with messages = get_flashed_messages() %}
+                    {% if messages %}
+                        <div class="flash-messages">
+                            {% for message in messages %}
+                                <div class="flash-error">{{ message }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                {% endwith %}
+            </section>
+
+            <section id="about" class="card" style="display: none;">
+                <h2><i class="fas fa-info-circle"></i> Sobre o Projeto</h2>
+                
+                <div class="about-content">
+                    <div class="about-section">
+                        <h3><i class="fas fa-brain"></i> Tecnologia</h3>
+                        <p>Este sistema utiliza o modelo CLIP da OpenAI para extrair características de imagens e encontrar similares usando embeddings vetoriais.</p>
+                    </div>
+                    
+                    <div class="about-section">
+                        <h3><i class="fas fa-database"></i> Dataset</h3>
+                        <p>O sistema foi treinado no dataset E-PillID, contendo imagens de diferentes tipos de comprimidos e medicamentos.</p>
+                    </div>
+                    
+                    <div class="about-section">
+                        <h3><i class="fas fa-code"></i> Funcionamento</h3>
+                        <p>1. A imagem enviada é convertida em um vetor de características (embedding)</p>
+                        <p>2. O sistema busca no banco de dados os vetores mais próximos</p>
+                        <p>3. As imagens correspondentes são retornadas ordenadas por similaridade</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Sistema de Classificação de Imagens &copy; 2024</p>
+            <p class="tech">Powered by CLIP + FAISS + Flask</p>
+        </footer>
+    </div>
+
+    <script>
+        // Navegação entre abas
+        document.querySelectorAll('nav a').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                
+                // Atualizar aba ativa
+                document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+                this.classList.add('active');
+                
+                // Mostrar seção correspondente
+                const targetId = this.getAttribute('href').substring(1);
+                document.querySelectorAll('main section').forEach(section => {
+                    section.style.display = 'none';
+                });
+                
+                document.getElementById(targetId).style.display = 'block';
+            });
+        });
+        
+        // Preview da imagem selecionada
+        document.getElementById('file').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    // Remover preview anterior se existir
+                    const oldPreview = document.querySelector('.image-preview');
+                    if (oldPreview) oldPreview.remove();
+                    
+                    // Criar novo preview
+                    const preview = document.createElement('div');
+                    preview.className = 'image-preview';
+                    preview.innerHTML = `
+                        <h3>Preview:</h3>
+                        <img src="${e.target.result}" alt="Preview">
+                        <p>${file.name} (${(file.size / 1024).toFixed(2)} KB)</p>
+                    `;
+                    
+                    // Inserir após o input de arquivo
+                    const fileInput = document.getElementById('file');
+                    fileInput.parentNode.appendChild(preview);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    </script>
+</body>
+</html>
