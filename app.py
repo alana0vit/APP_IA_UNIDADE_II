@@ -1,206 +1,195 @@
 import os
+import sys
 import torch
 import clip
-import faiss
 import numpy as np
 from PIL import Image
 from flask import Flask, render_template, request, redirect, url_for, flash
-import matplotlib
-matplotlib.use('Agg')  # Usar backend não interativo
-import matplotlib.pyplot as plt
-import io
-import base64
 from datetime import datetime
+from sklearn.metrics.pairwise import cosine_similarity
+import pickle
 
+# Configurações
 app = Flask(__name__)
-app.secret_key = 'sua_chave_secreta_aqui'  # Mude para produção!
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+app.secret_key = 'sua-chave-secreta-aqui'
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
-app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif'}
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-# Variáveis globais para o modelo
-device = None
+# Variáveis globais
 model = None
 preprocess = None
-index = None
-image_paths = []
+embeddings_cache = None
+image_paths_cache = []
 
-def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
-
-def setup_model():
-    """Configura o modelo CLIP e carrega as embeddings"""
-    global device, model, preprocess, index, image_paths
-    
+def load_model():
+    """Carrega o modelo CLIP"""
+    global model, preprocess
     try:
-        print("Iniciando setup do modelo...")
-        
-        # Configurar dispositivo
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Dispositivo: {device}")
-        
-        # Carregar modelo CLIP
-        print("Carregando modelo CLIP...")
+        print(f"Carregando modelo CLIP no dispositivo: {device}")
         model, preprocess = clip.load("ViT-B/32", device=device)
-        
-        # Verificar se as embeddings existem
-        embeddings_path = "model/embeddings.npy"
-        image_paths_file = "model/image_paths.npy"
-        
-        if os.path.exists(embeddings_path) and os.path.exists(image_paths_file):
-            print("Carregando embeddings pré-calculadas...")
-            embeddings = np.load(embeddings_path)
-            image_paths = np.load(image_paths_file, allow_pickle=True).tolist()
-        else:
-            print("Embeddings não encontradas. Execute primeiro o setup_model.py")
-            return False
-        
-        # Criar índice FAISS
-        print("Criando índice FAISS...")
-        d = embeddings.shape[1]
-        index = faiss.IndexFlatL2(d)
-        index.add(embeddings.astype("float32"))
-        
-        print("Setup do modelo concluído com sucesso!")
+        print("✅ Modelo CLIP carregado")
         return True
-        
     except Exception as e:
-        print(f"Erro no setup do modelo: {str(e)}")
+        print(f"❌ Erro ao carregar modelo: {e}")
         return False
 
-def similar(image_path, k=5):
+def load_embeddings():
+    """Carrega embeddings do cache ou gera do dataset"""
+    global embeddings_cache, image_paths_cache
+    
+    cache_file = "embeddings_cache.pkl"
+    
+    if os.path.exists(cache_file):
+        print("Carregando embeddings do cache...")
+        with open(cache_file, 'rb') as f:
+            data = pickle.load(f)
+            embeddings_cache = data['embeddings']
+            image_paths_cache = data['image_paths']
+        print(f"✅ {len(image_paths_cache)} embeddings carregados")
+        return True
+    
+    # Se não tem cache, processa o dataset
+    print("Processando dataset pela primeira vez...")
+    dataset_path = "epillid"
+    
+    if not os.path.exists(dataset_path):
+        print(f"❌ Dataset não encontrado: {dataset_path}")
+        return False
+    
+    embeddings = []
+    image_paths = []
+    
+    # Encontrar todas as imagens
+    for root, dirs, files in os.walk(dataset_path):
+        for file in files:
+            if file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                path = os.path.join(root, file)
+                image_paths.append(path)
+    
+    print(f"Processando {len(image_paths)} imagens...")
+    
+    for i, path in enumerate(image_paths):
+        try:
+            # Processar imagem
+            image = Image.open(path).convert("RGB")
+            image_tensor = preprocess(image).unsqueeze(0).to("cpu")
+            
+            # Gerar embedding
+            with torch.no_grad():
+                embedding = model.encode_image(image_tensor)
+                embedding = embedding / embedding.norm()
+                embeddings.append(embedding.cpu().numpy())
+            
+            if (i + 1) % 100 == 0:
+                print(f"  Processadas {i + 1}/{len(image_paths)} imagens")
+                
+        except Exception as e:
+            print(f"Erro em {path}: {e}")
+            embeddings.append(np.zeros((1, 512)))  # Embedding vazio
+    
+    # Salvar cache
+    embeddings_cache = np.vstack(embeddings).astype('float32')
+    image_paths_cache = image_paths
+    
+    with open(cache_file, 'wb') as f:
+        pickle.dump({
+            'embeddings': embeddings_cache,
+            'image_paths': image_paths_cache
+        }, f)
+    
+    print(f"✅ Dataset processado e salvo no cache")
+    return True
+
+def find_similar_images(query_image_path, top_k=5):
     """Encontra imagens similares"""
     try:
-        # Carregar e processar imagem
-        img = Image.open(image_path).convert("RGB")
-        img_tensor = preprocess(img).unsqueeze(0).to(device)
+        # Processar imagem de consulta
+        query_image = Image.open(query_image_path).convert("RGB")
+        query_tensor = preprocess(query_image).unsqueeze(0).to("cpu")
         
-        # Gerar embedding da imagem de consulta
         with torch.no_grad():
-            query_emb = model.encode_image(img_tensor)
-            query_emb /= query_emb.norm()
-            query_emb = query_emb.cpu().numpy().astype("float32")
+            query_embedding = model.encode_image(query_tensor)
+            query_embedding = query_embedding / query_embedding.norm()
+            query_embedding = query_embedding.cpu().numpy()
         
-        # Buscar no índice FAISS
-        distances, indices = index.search(query_emb, k)
+        # Calcular similaridades
+        similarities = cosine_similarity(query_embedding, embeddings_cache)[0]
+        
+        # Pegar top K
+        top_indices = similarities.argsort()[-top_k:][::-1]
         
         # Preparar resultados
         results = []
-        for i, (dist, idx) in enumerate(zip(distances[0], indices[0])):
-            if idx < len(image_paths):  # Verificar índice válido
-                result = {
-                    'rank': i + 1,
-                    'distance': float(dist),
-                    'path': image_paths[idx],
-                    'filename': os.path.basename(image_paths[idx])
-                }
-                results.append(result)
+        for i, idx in enumerate(top_indices):
+            results.append({
+                'rank': i + 1,
+                'similarity': float(similarities[idx]),
+                'filepath': image_paths_cache[idx],
+                'filename': os.path.basename(image_paths_cache[idx])
+            })
         
-        return results, None
+        return results
         
     except Exception as e:
-        return None, str(e)
-
-def plot_results(query_img_path, results):
-    """Cria um gráfico com os resultados"""
-    try:
-        # Criar figura com subplots
-        fig, axes = plt.subplots(1, len(results) + 1, figsize=(4 * (len(results) + 1), 4))
-        
-        # Plotar imagem de consulta
-        query_img = Image.open(query_img_path)
-        axes[0].imshow(query_img)
-        axes[0].set_title('Imagem de Consulta')
-        axes[0].axis('off')
-        
-        # Plotar imagens similares
-        for i, result in enumerate(results):
-            try:
-                img = Image.open(result['path'])
-                axes[i + 1].imshow(img)
-                axes[i + 1].set_title(f'Similar {i+1}\nDist: {result["distance"]:.3f}')
-                axes[i + 1].axis('off')
-            except:
-                axes[i + 1].text(0.5, 0.5, 'Imagem não encontrada', 
-                                ha='center', va='center')
-                axes[i + 1].axis('off')
-        
-        plt.tight_layout()
-        
-        # Converter para base64
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
-        buf.seek(0)
-        img_str = base64.b64encode(buf.getvalue()).decode('utf-8')
-        plt.close(fig)
-        
-        return f"data:image/png;base64,{img_str}"
-        
-    except Exception as e:
-        print(f"Erro ao criar gráfico: {e}")
-        return None
+        print(f"Erro na busca: {e}")
+        return []
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    """Página principal"""
     if request.method == 'POST':
-        # Verificar se o arquivo foi enviado
         if 'file' not in request.files:
-            flash('Nenhum arquivo selecionado')
+            flash('Selecione uma imagem!')
             return redirect(request.url)
         
         file = request.files['file']
         
         if file.filename == '':
-            flash('Nenhum arquivo selecionado')
+            flash('Selecione uma imagem!')
             return redirect(request.url)
         
-        if file and allowed_file(file.name):
-            # Salvar arquivo
+        if file and file.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+            # Salvar imagem
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"{timestamp}_{file.filename}"
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
             file.save(filepath)
             
-            # Obter número de resultados
-            k = int(request.form.get('k', 5))
+            # Buscar similares
+            results = find_similar_images(filepath, top_k=5)
             
-            # Buscar imagens similares
-            results, error = similar(filepath, k=k)
-            
-            if error:
-                flash(f'Erro ao processar imagem: {error}')
+            if results:
+                return render_template('results_ultra_simple.html',
+                                     query_image=filename,
+                                     results=results)
+            else:
+                flash('Nenhuma similar encontrada!')
                 return redirect(request.url)
-            
-            # Gerar visualização
-            plot_url = plot_results(filepath, results[:min(k, len(results))])
-            
-            return render_template('results.html', 
-                                 query_image=filepath,
-                                 results=results,
-                                 plot_url=plot_url,
-                                 k=k)
         else:
-            flash('Tipo de arquivo não permitido. Use PNG, JPG ou JPEG')
+            flash('Formato inválido! Use JPG ou PNG.')
             return redirect(request.url)
     
-    return render_template('index.html')
-
-@app.route('/about')
-def about():
-    return render_template('index.html', section='about')
+    return render_template('index_ultra_simple.html',
+                         total_images=len(image_paths_cache) if image_paths_cache else 0)
 
 if __name__ == '__main__':
-    # Criar diretórios necessários
+    # Criar pasta de uploads
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs('model', exist_ok=True)
     
-    # Configurar modelo
-    print("Inicializando aplicação...")
-    if setup_model():
-        print("Modelo carregado com sucesso!")
-        # Para produção no Render, usar host='0.0.0.0' e port adequada
-        port = int(os.environ.get('PORT', 5000))
-        app.run(host='0.0.0.0', port=port, debug=False)
+    print("🚀 Iniciando E-Pill Finder...")
+    
+    if load_model():
+        if load_embeddings():
+            print(f"✅ Sistema pronto com {len(image_paths_cache)} imagens")
+            
+            # Configuração para Render
+            port = int(os.environ.get('PORT', 5000))
+            debug_mode = os.environ.get('FLASK_ENV') == 'development'
+            
+            app.run(host='0.0.0.0', port=port, debug=debug_mode)
+        else:
+            print("❌ Falha ao carregar embeddings")
     else:
-        print("Falha ao carregar o modelo. Verifique se as embeddings foram geradas.")
+        print("❌ Falha ao carregar modelo")

@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: epill-finder
+    env: python
+    buildCommand: |
+      pip install -r requirements.txt
+      python -c "
+      import pickle
+      import numpy as np
+      import os
+      
+      # Verificar se o cache existe
+      if not os.path.exists('embeddings_cache.pkl'):
+          print('⚠️  Cache não encontrado. Execute localmente primeiro:')
+          print('   1. python app.py')
+          print('   2. Aguarde processar as imagens')
+          print('   3. Envie o arquivo embeddings_cache.pkl para o GitHub')
+      else:
+          print('✅ Cache encontrado')
+      "
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0  # Use 3.11 para maior compatibilidade
+      - key: SECRET_KEY
+        generateValue: true
+      - key: FLASK_ENV
+        value: production
