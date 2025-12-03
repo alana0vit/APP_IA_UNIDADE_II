@@ -161,7 +161,7 @@ def index():
             results = find_similar_images(filepath, top_k=5)
             
             if results:
-                return render_template('results_ultra_simple.html',
+                return render_template('results.html',
                                      query_image=filename,
                                      results=results)
             else:
@@ -171,7 +171,7 @@ def index():
             flash('Formato inválido! Use JPG ou PNG.')
             return redirect(request.url)
     
-    return render_template('index_ultra_simple.html',
+    return render_template('index.html',
                          total_images=len(image_paths_cache) if image_paths_cache else 0)
 
 if __name__ == '__main__':
