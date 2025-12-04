@@ -1,11 +1,12 @@
-Flask==3.1.2
-gunicorn==23.0.0
-torch==2.2.1
-torchvision==0.17.1
-clip @ git+https://github.com/openai/CLIP.git
-scikit-learn==1.5.2
-numpy==1.26.4
-Pillow==10.4.0
-matplotlib==3.10.7
-tqdm==4.67.1
-python-dotenv==1.0.1
+Flask==2.3.3
+Pillow==10.0.0
+torch==2.0.1
+torchvision==0.15.2
+faiss-cpu==1.7.4
+ftfy==6.1.1
+regex==2023.6.3
+tqdm==4.65.0
+clip-by-openai
+numpy==1.24.3
+python-dotenv==1.0.0
+gunicorn==20.1.0

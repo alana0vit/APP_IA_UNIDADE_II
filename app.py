@@ -1,207 +1,141 @@
+from flask import Flask, render_template, request, jsonify, send_from_directory
 import os
-import sys
-import torch
-import clip
-import numpy as np
-from PIL import Image
-from flask import Flask, render_template, request, redirect, url_for, flash
+from werkzeug.utils import secure_filename
 from datetime import datetime
-from sklearn.metrics.pairwise import cosine_similarity
-import pickle
+import uuid
+from model_loader import ImageClassifier
+from database import db, UploadedImage, SearchResult, init_db
+
+app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'sua-chave-secreta-aqui')
 
 # Configurações
-app = Flask(__name__)
-app.secret_key = 'sua-chave-secreta-aqui'
-app.config['UPLOAD_FOLDER'] = 'static/uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 
-# Variáveis globais
-model = None
-preprocess = None
-embeddings_cache = None
-image_paths_cache = []
+# Criar pastas necessárias
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs('static/results', exist_ok=True)
 
-def load_model():
-    """Carrega o modelo CLIP"""
-    global model, preprocess
-    try:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Carregando modelo CLIP no dispositivo: {device}")
-        model, preprocess = clip.load("ViT-B/32", device=device)
-        print("✅ Modelo CLIP carregado")
-        return True
-    except Exception as e:
-        print(f"❌ Erro ao carregar modelo: {e}")
-        return False
+# Inicializar banco de dados
+init_db(app)
 
-def download_cache_from_url():
-    """Baixa o cache de uma URL externa"""
-    import urllib.request
-    import gzip
-    
-    cache_url = "https://drive.google.com/file/d/19JLPivjrLH3kthbzEJeCVcpZH0p5jhr8/view?usp=sharing"
-    
-    print(f"Baixando cache de {cache_url}...")
-    
-    try:
-        # Baixar arquivo
-        urllib.request.urlretrieve(cache_url, "embeddings_cache.pkl.gz")
-        
-        # Descomprimir
-        with gzip.open("embeddings_cache.pkl.gz", 'rb') as f:
-            import pickle
-            data = pickle.load(f)
-        
-        # Salvar local
-        with open("embeddings_cache.pkl", 'wb') as f:
-            pickle.dump(data, f)
-        
-        print("✅ Cache baixado e extraído")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Erro ao baixar cache: {e}")
-        return False
+# Inicializar classificador de imagens (pode demorar na primeira execução)
+print("Carregando modelo CLIP...")
+classifier = ImageClassifier()
 
-def load_embeddings():
-    """Carrega embeddings - com fallback para download"""
-    global embeddings_cache, image_paths_cache
-    
-    cache_file = "embeddings_cache.pkl"
-    
-    if os.path.exists(cache_file):
-        print("Carregando embeddings do cache local...")
-        with open(cache_file, 'rb') as f:
-            data = pickle.load(f)
-            embeddings_cache = data['embeddings']
-            image_paths_cache = data['image_paths']
-        print(f"✅ {len(image_paths_cache)} embeddings carregados")
-        return True
-    else:
-        print("⚠️  Cache local não encontrado")
-        
-        # Tentar baixar
-        if download_cache_from_url():
-            return load_embeddings()  # Recarregar
-        else:
-            print("❌ Não foi possível obter o cache")
-            return False
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def find_similar_images(query_image_path, top_k=5):
-    """Encontra imagens similares"""
-    try:
-        # Processar imagem de consulta
-        query_image = Image.open(query_image_path).convert("RGB")
-        query_tensor = preprocess(query_image).unsqueeze(0).to("cpu")
-        
-        with torch.no_grad():
-            query_embedding = model.encode_image(query_tensor)
-            query_embedding = query_embedding / query_embedding.norm()
-            query_embedding = query_embedding.cpu().numpy()
-        
-        # Calcular similaridades
-        similarities = cosine_similarity(query_embedding, embeddings_cache)[0]
-        
-        # Pegar top K
-        top_indices = similarities.argsort()[-top_k:][::-1]
-        
-        # Preparar resultados
-        results = []
-        for i, idx in enumerate(top_indices):
-            # Obter caminho relativo para a web
-            full_path = image_paths_cache[idx]
-            rel_path = os.path.relpath(full_path, 'epillid')
-            
-            results.append({
-                'rank': i + 1,
-                'similarity': float(similarities[idx]),
-                'filepath': full_path,  # Caminho completo (para processamento)
-                'web_path': f"/dataset_image/{rel_path}",  # Caminho para web
-                'filename': os.path.basename(full_path)
-            })
-        
-        return results
-        
-    except Exception as e:
-        print(f"Erro na busca: {e}")
-        return []
-
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def index():
-    """Página principal"""
-    if request.method == 'POST':
-        if 'file' not in request.files:
-            flash('Selecione uma imagem!')
-            return redirect(request.url)
-        
-        file = request.files['file']
-        
-        if file.filename == '':
-            flash('Selecione uma imagem!')
-            return redirect(request.url)
-        
-        if file and file.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
-            # Salvar imagem
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"{timestamp}_{file.filename}"
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            file.save(filepath)
-            
-            # Buscar similares
-            results = find_similar_images(filepath, top_k=5)
-            
-            if results:
-                return render_template('results.html',
-                                     query_image=filename,
-                                     results=results)
-            else:
-                flash('Nenhuma similar encontrada!')
-                return redirect(request.url)
-        else:
-            flash('Formato inválido! Use JPG ou PNG.')
-            return redirect(request.url)
-    
-    return render_template('index.html',
-                         total_images=len(image_paths_cache) if image_paths_cache else 0)
+    return render_template('index.html')
 
-@app.route('/dataset_image/<path:filename>')
-def dataset_image(filename):
-    """Serve imagens do dataset"""
-    try:
-        # Procurar a imagem no dataset
-        dataset_path = "epillid"
-        image_path = os.path.join(dataset_path, filename)
+@app.route('/upload', methods=['POST'])
+def upload_image():
+    if 'file' not in request.files:
+        return jsonify({'error': 'Nenhum arquivo enviado'}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'error': 'Nenhum arquivo selecionado'}), 400
+    
+    if file and allowed_file(file.filename):
+        # Gerar nome único para o arquivo
+        original_filename = secure_filename(file.filename)
+        filename = f"{uuid.uuid4().hex}_{original_filename}"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         
-        if os.path.exists(image_path):
-            return send_file(image_path)
-        else:
-            # Tentar encontrar pelo caminho completo
-            for img_path in image_paths_cache:
-                if filename in img_path:
-                    return send_file(img_path)
-            
-            return "Imagem não encontrada", 404
-    except Exception as e:
-        print(f"Erro ao servir imagem {filename}: {e}")
-        return "Erro", 500
+        # Salvar arquivo
+        file.save(filepath)
+        file_size = os.path.getsize(filepath)
+        
+        # Salvar no banco de dados
+        uploaded_image = UploadedImage(
+            filename=filename,
+            original_filename=original_filename,
+            file_size=file_size
+        )
+        db.session.add(uploaded_image)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'original_filename': original_filename,
+            'image_id': uploaded_image.id
+        })
     
+    return jsonify({'error': 'Tipo de arquivo não permitido'}), 400
+
+@app.route('/search', methods=['POST'])
+def search_similar():
+    data = request.json
+    filename = data.get('filename')
+    k = data.get('k', 5)
+    
+    if not filename:
+        return jsonify({'error': 'Nome do arquivo não fornecido'}), 400
+    
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    
+    if not os.path.exists(filepath):
+        return jsonify({'error': 'Arquivo não encontrado'}), 404
+    
+    # Buscar imagens similares
+    results = classifier.search_similar_images(filepath, k=k)
+    
+    # Salvar resultados no banco de dados
+    uploaded_image = UploadedImage.query.filter_by(filename=filename).first()
+    
+    if uploaded_image:
+        for result in results:
+            search_result = SearchResult(
+                uploaded_image_id=uploaded_image.id,
+                similar_image_path=result['path'],
+                similarity_score=result['distance']
+            )
+            db.session.add(search_result)
+        db.session.commit()
+    
+    # Preparar resposta
+    response_results = []
+    for result in results:
+        # Converter caminho relativo para URL
+        rel_path = os.path.relpath(result['path'], start='.')
+        response_results.append({
+            'path': rel_path,
+            'distance': result['distance'],
+            'filename': result['filename']
+        })
+    
+    return jsonify({
+        'success': True,
+        'results': response_results,
+        'count': len(response_results)
+    })
+
+@app.route('/history')
+def history():
+    # Obter histórico de uploads
+    uploads = UploadedImage.query.order_by(UploadedImage.upload_date.desc()).limit(50).all()
+    return render_template('history.html', uploads=uploads)
+
+@app.route('/api/history')
+def api_history():
+    uploads = UploadedImage.query.order_by(UploadedImage.upload_date.desc()).limit(50).all()
+    return jsonify([upload.to_dict() for upload in uploads])
+
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+@app.route('/dataset/<path:filename>')
+def dataset_file(filename):
+    return send_from_directory('.', filename)
+
 if __name__ == '__main__':
-    # Criar pasta de uploads
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    
-    print("🚀 Iniciando E-Pill Finder...")
-    
-    if load_model():
-        if load_embeddings():
-            print(f"✅ Sistema pronto com {len(image_paths_cache)} imagens")
-            
-            # Configuração para Render
-            port = int(os.environ.get('PORT', 5000))
-            debug_mode = os.environ.get('FLASK_ENV') == 'development'
-            
-            app.run(host='0.0.0.0', port=port, debug=debug_mode)
-        else:
-            print("❌ Falha ao carregar embeddings")
-    else:
-        print("❌ Falha ao carregar modelo")
+    app.run(debug=True, host='0.0.0.0', port=5000)

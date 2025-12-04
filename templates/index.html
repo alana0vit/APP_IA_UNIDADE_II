@@ -1,63 +1,120 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
-    <title>E-Pill Finder</title>
-    <style>
-        body { font-family: Arial; margin: 0; padding: 20px; background: #f0f2f5; }
-        .container { max-width: 800px; margin: auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; text-align: center; }
-        .upload-box { border: 2px dashed #ccc; padding: 40px; text-align: center; margin: 20px 0; border-radius: 10px; }
-        .btn { background: #4CAF50; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
-        .btn:hover { background: #45a049; }
-        .preview { max-width: 300px; margin: 20px auto; display: none; }
-        .preview img { width: 100%; border-radius: 5px; }
-        .stats { text-align: center; color: #666; margin: 20px 0; }
-        .error { background: #ffebee; color: #c62828; padding: 10px; border-radius: 5px; margin: 10px 0; }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classificador de Imagens CLIP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
     <div class="container">
-        <h1>🔍 E-Pill Finder</h1>
-        
-        <div class="stats">
-            <p>📊 {{ total_images }} imagens no banco de dados</p>
-        </div>
-        
-        <form action="/" method="POST" enctype="multipart/form-data">
-            <div class="upload-box">
-                <h3>Envie uma imagem de medicamento</h3>
-                <p>Faça upload para encontrar medicamentos similares</p>
-                
-                <input type="file" id="fileInput" name="file" accept=".jpg,.jpeg,.png" required
-                       style="margin: 20px 0;">
-                
-                <div class="preview" id="preview">
-                    <img id="previewImage" alt="Preview">
+        <header>
+            <h1><i class="fas fa-robot"></i> Classificador de Imagens IA</h1>
+            <p>Envie uma imagem para encontrar as imagens mais similares no dataset usando CLIP da OpenAI</p>
+        </header>
+
+        <main>
+            <div class="upload-section">
+                <div class="upload-area" id="uploadArea">
+                    <i class="fas fa-cloud-upload-alt fa-3x"></i>
+                    <h3>Arraste e solte sua imagem aqui</h3>
+                    <p>ou</p>
+                    <label for="fileInput" class="btn btn-primary">
+                        <i class="fas fa-folder-open"></i> Selecione um arquivo
+                    </label>
+                    <input type="file" id="fileInput" accept="image/*" hidden>
+                    <p class="formats">Formatos suportados: JPG, PNG, JPEG, GIF, BMP</p>
                 </div>
                 
-                <button type="submit" class="btn">🔍 Buscar Similares</button>
+                <div class="preview-section" id="previewSection" style="display: none;">
+                    <h3>Pré-visualização</h3>
+                    <div class="image-preview">
+                        <img id="previewImage" src="" alt="Pré-visualização">
+                    </div>
+                    <div class="preview-info">
+                        <p id="fileName"></p>
+                        <p id="fileSize"></p>
+                    </div>
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" onclick="searchSimilar()">
+                            <i class="fas fa-search"></i> Buscar Similares
+                        </button>
+                        <button class="btn btn-secondary" onclick="clearUpload()">
+                            <i class="fas fa-times"></i> Limpar
+                        </button>
+                    </div>
+                </div>
             </div>
-        </form>
-        
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}
-                {% for message in messages %}
-                    <div class="error">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+
+            <div class="results-section" id="resultsSection" style="display: none;">
+                <h2><i class="fas fa-images"></i> Imagens Similares Encontradas</h2>
+                <div class="results-grid" id="resultsGrid">
+                    <!-- Resultados serão inseridos aqui -->
+                </div>
+                <div class="loading" id="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Processando imagem e buscando similares...</p>
+                </div>
+            </div>
+
+            <div class="info-section">
+                <h3><i class="fas fa-info-circle"></i> Como funciona</h3>
+                <div class="info-cards">
+                    <div class="card">
+                        <i class="fas fa-upload"></i>
+                        <h4>1. Upload</h4>
+                        <p>Envie sua imagem para análise</p>
+                    </div>
+                    <div class="card">
+                        <i class="fas fa-brain"></i>
+                        <h4>2. Processamento IA</h4>
+                        <p>CLIP converte a imagem em vetores</p>
+                    </div>
+                    <div class="card">
+                        <i class="fas fa-search"></i>
+                        <h4>3. Busca Similar</h4>
+                        <p>Encontra imagens similares no dataset</p>
+                    </div>
+                    <div class="card">
+                        <i class="fas fa-chart-bar"></i>
+                        <h4>4. Resultados</h4>
+                        <p>Visualize as imagens mais similares</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <div class="footer-links">
+                <a href="/history"><i class="fas fa-history"></i> Histórico</a>
+                <a href="#" onclick="showAbout()"><i class="fas fa-question-circle"></i> Sobre</a>
+                <a href="https://openai.com/research/clip" target="_blank"><i class="fas fa-external-link-alt"></i> Sobre CLIP</a>
+            </div>
+            <p class="footer-note">Powered by CLIP AI Model • Desenvolvido para classificação de imagens</p>
+        </footer>
     </div>
-    
-    <script>
-        // Preview da imagem
-        document.getElementById('fileInput').onchange = function(e) {
-            var reader = new FileReader();
-            reader.onload = function(e) {
-                document.getElementById('previewImage').src = e.target.result;
-                document.getElementById('preview').style.display = 'block';
-            }
-            reader.readAsDataURL(e.target.files[0]);
-        }
-    </script>
+
+    <!-- Modal Sobre -->
+    <div id="aboutModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2><i class="fas fa-robot"></i> Sobre o Sistema</h2>
+            <p>Este sistema utiliza o modelo CLIP (Contrastive Language-Image Pre-training) da OpenAI para encontrar imagens similares em um dataset.</p>
+            
+            <h3>Tecnologias utilizadas:</h3>
+            <ul>
+                <li><strong>CLIP</strong>: Modelo de IA da OpenAI treinado em 400 milhões de pares imagem-texto</li>
+                <li><strong>FAISS</strong>: Biblioteca para busca eficiente de similaridade</li>
+                <li><strong>PyTorch</strong>: Framework de deep learning</li>
+                <li><strong>Flask</strong>: Framework web em Python</li>
+                <li><strong>SQLite</strong>: Banco de dados para persistência</li>
+            </ul>
+            
+            <p>O sistema converte imagens em vetores (embeddings) e busca as imagens mais próximas no espaço vetorial.</p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
 </html>
