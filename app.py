@@ -34,72 +34,58 @@ def load_model():
         print(f"❌ Erro ao carregar modelo: {e}")
         return False
 
+def download_cache_from_url():
+    """Baixa o cache de uma URL externa"""
+    import urllib.request
+    import gzip
+    
+    cache_url = "https://drive.google.com/file/d/19JLPivjrLH3kthbzEJeCVcpZH0p5jhr8/view?usp=sharing"
+    
+    print(f"Baixando cache de {cache_url}...")
+    
+    try:
+        # Baixar arquivo
+        urllib.request.urlretrieve(cache_url, "embeddings_cache.pkl.gz")
+        
+        # Descomprimir
+        with gzip.open("embeddings_cache.pkl.gz", 'rb') as f:
+            import pickle
+            data = pickle.load(f)
+        
+        # Salvar local
+        with open("embeddings_cache.pkl", 'wb') as f:
+            pickle.dump(data, f)
+        
+        print("✅ Cache baixado e extraído")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Erro ao baixar cache: {e}")
+        return False
+
 def load_embeddings():
-    """Carrega embeddings do cache ou gera do dataset"""
+    """Carrega embeddings - com fallback para download"""
     global embeddings_cache, image_paths_cache
     
     cache_file = "embeddings_cache.pkl"
     
     if os.path.exists(cache_file):
-        print("Carregando embeddings do cache...")
+        print("Carregando embeddings do cache local...")
         with open(cache_file, 'rb') as f:
             data = pickle.load(f)
             embeddings_cache = data['embeddings']
             image_paths_cache = data['image_paths']
         print(f"✅ {len(image_paths_cache)} embeddings carregados")
         return True
-    
-    # Se não tem cache, processa o dataset
-    print("Processando dataset pela primeira vez...")
-    dataset_path = "epillid"
-    
-    if not os.path.exists(dataset_path):
-        print(f"❌ Dataset não encontrado: {dataset_path}")
-        return False
-    
-    embeddings = []
-    image_paths = []
-    
-    # Encontrar todas as imagens
-    for root, dirs, files in os.walk(dataset_path):
-        for file in files:
-            if file.lower().endswith(('.jpg', '.jpeg', '.png')):
-                path = os.path.join(root, file)
-                image_paths.append(path)
-    
-    print(f"Processando {len(image_paths)} imagens...")
-    
-    for i, path in enumerate(image_paths):
-        try:
-            # Processar imagem
-            image = Image.open(path).convert("RGB")
-            image_tensor = preprocess(image).unsqueeze(0).to("cpu")
-            
-            # Gerar embedding
-            with torch.no_grad():
-                embedding = model.encode_image(image_tensor)
-                embedding = embedding / embedding.norm()
-                embeddings.append(embedding.cpu().numpy())
-            
-            if (i + 1) % 100 == 0:
-                print(f"  Processadas {i + 1}/{len(image_paths)} imagens")
-                
-        except Exception as e:
-            print(f"Erro em {path}: {e}")
-            embeddings.append(np.zeros((1, 512)))  # Embedding vazio
-    
-    # Salvar cache
-    embeddings_cache = np.vstack(embeddings).astype('float32')
-    image_paths_cache = image_paths
-    
-    with open(cache_file, 'wb') as f:
-        pickle.dump({
-            'embeddings': embeddings_cache,
-            'image_paths': image_paths_cache
-        }, f)
-    
-    print(f"✅ Dataset processado e salvo no cache")
-    return True
+    else:
+        print("⚠️  Cache local não encontrado")
+        
+        # Tentar baixar
+        if download_cache_from_url():
+            return load_embeddings()  # Recarregar
+        else:
+            print("❌ Não foi possível obter o cache")
+            return False
 
 def find_similar_images(query_image_path, top_k=5):
     """Encontra imagens similares"""
@@ -122,11 +108,16 @@ def find_similar_images(query_image_path, top_k=5):
         # Preparar resultados
         results = []
         for i, idx in enumerate(top_indices):
+            # Obter caminho relativo para a web
+            full_path = image_paths_cache[idx]
+            rel_path = os.path.relpath(full_path, 'epillid')
+            
             results.append({
                 'rank': i + 1,
                 'similarity': float(similarities[idx]),
-                'filepath': image_paths_cache[idx],
-                'filename': os.path.basename(image_paths_cache[idx])
+                'filepath': full_path,  # Caminho completo (para processamento)
+                'web_path': f"/dataset_image/{rel_path}",  # Caminho para web
+                'filename': os.path.basename(full_path)
             })
         
         return results
@@ -161,7 +152,7 @@ def index():
             results = find_similar_images(filepath, top_k=5)
             
             if results:
-                return render_template('results_ultra_simple.html',
+                return render_template('results.html',
                                      query_image=filename,
                                      results=results)
             else:
@@ -171,9 +162,30 @@ def index():
             flash('Formato inválido! Use JPG ou PNG.')
             return redirect(request.url)
     
-    return render_template('index_ultra_simple.html',
+    return render_template('index.html',
                          total_images=len(image_paths_cache) if image_paths_cache else 0)
 
+@app.route('/dataset_image/<path:filename>')
+def dataset_image(filename):
+    """Serve imagens do dataset"""
+    try:
+        # Procurar a imagem no dataset
+        dataset_path = "epillid"
+        image_path = os.path.join(dataset_path, filename)
+        
+        if os.path.exists(image_path):
+            return send_file(image_path)
+        else:
+            # Tentar encontrar pelo caminho completo
+            for img_path in image_paths_cache:
+                if filename in img_path:
+                    return send_file(img_path)
+            
+            return "Imagem não encontrada", 404
+    except Exception as e:
+        print(f"Erro ao servir imagem {filename}: {e}")
+        return "Erro", 500
+    
 if __name__ == '__main__':
     # Criar pasta de uploads
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
