@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: image-classifier
+    env: python
+    buildCommand: |
+      pip install -r requirements_light.txt
+      # Criar pastas necessárias
+      mkdir -p embeddings sample_images uploads
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.18
+      - key: SECRET_KEY
+        generateValue: true
+    disk:
+      name: data
+      mountPath: /opt/render/project/src
+      sizeGB: 1
