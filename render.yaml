@@ -1,12 +1,14 @@
 services:
   - type: web
-    name: image-classifier
+    name: image-classifier-app
     env: python
+    region: oregon
+    plan: free
+    branch: main
     buildCommand: |
-      pip install -r requirements_light.txt
-      # Criar pastas necessárias
-      mkdir -p embeddings sample_images uploads
-    startCommand: gunicorn app:app
+      chmod +x setup.sh
+      ./setup.sh
+    startCommand: gunicorn app:app --timeout 120
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.18

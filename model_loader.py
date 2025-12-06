@@ -7,6 +7,28 @@ import os
 import pickle
 import pandas as pd
 from tqdm import tqdm
+import sys
+
+try:
+    import clip
+    CLIP_AVAILABLE = True
+    print("✅ CLIP importado com sucesso")
+except ImportError as e:
+    print(f"⚠️  CLIP não pôde ser importado: {e}")
+    print("⚠️  Instalando CLIP...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "git+https://github.com/openai/CLIP.git"])
+    import clip
+    CLIP_AVAILABLE = True
+    print("✅ CLIP instalado e importado")
+
+try:
+    import faiss
+    FAISS_AVAILABLE = True
+    print("✅ FAISS importado com sucesso")
+except ImportError as e:
+    print(f"❌ FAISS não pôde ser importado: {e}")
+    FAISS_AVAILABLE = False
 
 class ImageClassifier:
     def __init__(self, embeddings_path="embeddings", sample_images_path="sample_images"):
